@@ -35,6 +35,35 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<!-- PWA -->
+<link rel="manifest" id="pwaManifest"/>
+<meta name="theme-color" content="#0d0d0d"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="Meu Treino"/>
+<link rel="apple-touch-icon" id="appleIcon"/>
+<script>
+(function(){
+  const icon="data:image/svg+xml,"+encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%230d0d0d'/><text x='256' y='340' font-size='280' text-anchor='middle'>&#128170;</text><rect x='60' y='400' width='392' height='28' rx='14' fill='%23b5f23a'/></svg>");
+  document.getElementById('appleIcon').href=icon;
+  const manifest={name:"Meu Treino",short_name:"Treino",description:"Seu diário de treinos pessoal",start_url:"./",display:"standalone",background_color:"#0d0d0d",theme_color:"#0d0d0d",orientation:"portrait",icons:[{src:icon,sizes:"192x192",type:"image/svg+xml",purpose:"any maskable"},{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}]};
+  // Use manifest.json if hosted, else blob fallback
+  if(location.hostname !== 'localhost' && location.protocol !== 'file:'){
+    document.getElementById('pwaManifest').href='./manifest.json';
+  } else {
+    const blob=new Blob([JSON.stringify(manifest)],{type:'application/manifest+json'});
+    document.getElementById('pwaManifest').href=URL.createObjectURL(blob);
+  }
+})();
+if('serviceWorker' in navigator){
+  // Use sw.js if hosted on GitHub Pages, fallback to blob for local
+  const swUrl = (location.hostname === 'localhost' || location.protocol === 'file:')
+    ? URL.createObjectURL(new Blob([`const CACHE='meu-treino-v2';self.addEventListener('install',e=>{self.skipWaiting();});self.addEventListener('activate',e=>{self.clients.claim();});self.addEventListener('fetch',e=>{});`],{type:'text/javascript'}))
+    : './sw.js';
+  navigator.serviceWorker.register(swUrl).catch(()=>{});
+}
+</script>
 
 <style>
 :root{
