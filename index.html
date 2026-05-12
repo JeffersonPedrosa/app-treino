@@ -34,6 +34,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <!-- PWA -->
 <link rel="manifest" id="pwaManifest"/>
@@ -135,6 +136,7 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 .btn-accent{background:var(--accent);color:#000}.btn-accent:active{background:var(--accent-dim)}
 .btn-ghost{background:var(--card);border:1px solid var(--border);color:var(--text2)}.btn-ghost:active{background:var(--border)}
 .btn-danger{background:rgba(255,77,77,.1);border:1px solid rgba(255,77,77,.3);color:var(--red)}
+.btn-green{background:rgba(181,242,58,.1);border:1px solid rgba(181,242,58,.3);color:var(--accent)}
 .btn-blue{background:rgba(77,166,255,.1);border:1px solid rgba(77,166,255,.3);color:var(--blue)}
 .btn-full{width:100%}.btn-sm{padding:6px 12px;font-size:12px;border-radius:6px}
 .input-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
@@ -1024,6 +1026,7 @@ function renderConfig(scr){
 
     <div class="section-label" style="margin-top:20px">Dados</div>
     <button class="btn btn-blue btn-full" onclick="exportData()" style="margin-bottom:10px">📥 Exportar Backup (JSON)</button>
+    <button class="btn btn-green btn-full" onclick="exportExcel()" style="margin-bottom:10px">📊 Exportar Relatório (Excel)</button>
     <button class="btn btn-ghost btn-full" onclick="document.getElementById('importInput').click()" style="margin-bottom:10px">📤 Importar Backup</button>
     ${currentUser?`<div style="font-size:11px;color:var(--text3);text-align:center;margin-bottom:16px">Logado como: ${currentUser.email}</div>`:'<div style="font-size:11px;color:var(--text3);text-align:center;margin-bottom:16px">Modo local (sem Firebase configurado)</div>'}
     <div class="section-label">Zona de Perigo</div>
@@ -1057,15 +1060,48 @@ function saveProfile(){
   save();showToast('✅ Perfil salvo!');render();
 }
 function confirmReset(){
-  showModal('⚠️ Resetar Dados',`<div style="text-align:center;padding:20px 0"><div style="font-size:48px;margin-bottom:12px">🗑</div><div style="font-size:16px;font-weight:700">Tem certeza?</div><div style="font-size:13px;color:var(--text3);margin-top:8px">Todos os dados serão apagados permanentemente.</div></div>`,
-    [{label:'Sim, apagar tudo',cls:'btn-danger',fn:async()=>{
+  showModal('⚠️ Resetar Dados',`
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:48px;margin-bottom:10px">🗑</div>
+      <div style="font-size:16px;font-weight:700">Ação irreversível!</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:6px">Todos os treinos, histórico e configurações serão apagados permanentemente.</div>
+    </div>
+    <div class="input-group">
+      <div class="input-label">🔒 Confirme sua senha para continuar</div>
+      <div style="position:relative">
+        <input class="input" id="resetPwInput" type="password" placeholder="Digite sua senha" autocomplete="current-password" style="padding-right:44px"/>
+        <button onclick="toggleResetPw()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;padding:4px">👁</button>
+      </div>
+    </div>
+    <div id="resetPwErr" style="font-size:12px;color:var(--red);margin-top:-8px;margin-bottom:8px;display:none">❌ Senha incorreta. Tente novamente.</div>`,
+    [{label:'🗑 Apagar tudo',cls:'btn-danger',fn:async()=>{
+      const pw = document.getElementById('resetPwInput').value;
+      const errEl = document.getElementById('resetPwErr');
+      if(!pw){errEl.textContent='❌ Digite sua senha.';errEl.style.display='block';return;}
+      if(auth && currentUser){
+        try{
+          const cred = firebase.auth.EmailAuthProvider.credential(currentUser.email, pw);
+          await currentUser.reauthenticateWithCredential(cred);
+        }catch(e){
+          errEl.textContent='❌ Senha incorreta. Tente novamente.';errEl.style.display='block';return;
+        }
+      } else {
+        // No Firebase: use stored password hint or just accept any non-empty
+        if(pw.length < 3){errEl.textContent='❌ Senha muito curta.';errEl.style.display='block';return;}
+      }
       localStorage.removeItem('meuTreino3');
       if(db&&currentUser){
         const uid=currentUser.uid;
         await Promise.all(['main','history','photo'].map(d=>db.collection('users').doc(uid).collection('data').doc(d).delete().catch(()=>{})));
       }
-      location.reload();
+      closeModal();
+      showToast('✅ Dados apagados. Reiniciando...');
+      setTimeout(()=>location.reload(), 1200);
     }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]);
+}
+function toggleResetPw(){
+  const i=document.getElementById('resetPwInput');
+  if(i) i.type=i.type==='password'?'text':'password';
 }
 
 // ── PROFILE PHOTO ──
@@ -1103,6 +1139,104 @@ function exportData(){
   a.href=url;a.download=`meu-treino-backup-${date}.json`;a.click();
   URL.revokeObjectURL(url);
   showToast('📥 Backup baixado!');
+}
+
+function exportExcel(){
+  try {
+    const wb = XLSX.utils.book_new();
+    const dateStr = new Date().toISOString().slice(0,10);
+
+    // ── Sheet 1: Perfil & IMC ──
+    const p = S.profile;
+    const imc = p.weight && p.height ? (parseFloat(p.weight)/((parseFloat(p.height)/100)**2)).toFixed(1) : '—';
+    const profileRows = [
+      ['PERFIL DO USUÁRIO'],
+      ['Nome', p.name||'—'],
+      ['Idade', p.age||'—'],
+      ['Peso (kg)', p.weight||'—'],
+      ['Altura (cm)', p.height||'—'],
+      ['Objetivo', p.goal||'—'],
+      ['IMC', imc],
+      ['Data do relatório', dateStr]
+    ];
+    const wsProfile = XLSX.utils.aoa_to_sheet(profileRows);
+    wsProfile['!cols'] = [{wch:22},{wch:30}];
+    XLSX.utils.book_append_sheet(wb, wsProfile, 'Perfil');
+
+    // ── Sheet 2: Treinos por dia ──
+    const planRows = [['DIA','EXERCÍCIO','GRUPO','SÉRIES','REPS','CARGA (kg)','TEMPO (min)','CONCLUÍDO']];
+    for(let d=0;d<7;d++){
+      const exs = S.dayExercises[d]||[];
+      exs.forEach(item=>{
+        const ex = exDB(item.exId);
+        planRows.push([
+          DAYS_FULL[d],
+          ex.name,
+          GROUP_LABELS[ex.group]||ex.group,
+          item.sets||4,
+          item.reps||12,
+          item.weight||'',
+          item.time||'',
+          item.done ? 'Sim' : 'Não'
+        ]);
+      });
+    }
+    const wsPlan = XLSX.utils.aoa_to_sheet(planRows);
+    wsPlan['!cols'] = [{wch:18},{wch:30},{wch:14},{wch:8},{wch:8},{wch:12},{wch:12},{wch:10}];
+    XLSX.utils.book_append_sheet(wb, wsPlan, 'Treinos por Dia');
+
+    // ── Sheet 3: Histórico de cargas ──
+    const histRows = [['EXERCÍCIO','GRUPO','DATA','CARGA (kg)','SÉRIES','REPS']];
+    Object.entries(S.history).forEach(([exId, entries])=>{
+      const ex = exDB(exId);
+      (entries||[]).forEach(e=>{
+        histRows.push([ex.name, GROUP_LABELS[ex.group]||ex.group, e.date, parseFloat(e.weight)||0, e.sets, e.reps]);
+      });
+    });
+    histRows.sort((a,b)=> a[2]>b[2]?1:-1);
+    const wsHist = XLSX.utils.aoa_to_sheet(histRows);
+    wsHist['!cols'] = [{wch:30},{wch:14},{wch:12},{wch:12},{wch:8},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, wsHist, 'Histórico de Cargas');
+
+    // ── Sheet 4: Diário (logs diários) ──
+    const logRows = [['DATA','DIA DA SEMANA','CONCLUÍDO','TEMPO TREINO (min)','ATIVIDADE EXTRA','TEMPO EXTRA (min)']];
+    Object.entries(S.dailyLogs).sort((a,b)=>a[0]>b[0]?1:-1).forEach(([date,log])=>{
+      const d = new Date(date+'T12:00:00');
+      logRows.push([
+        date,
+        DAYS_FULL[d.getDay()],
+        log.trained ? 'Sim' : 'Não',
+        log.totalTime||'',
+        log.extraActivity||'',
+        log.extraTime||''
+      ]);
+    });
+    const wsLog = XLSX.utils.aoa_to_sheet(logRows);
+    wsLog['!cols'] = [{wch:12},{wch:18},{wch:12},{wch:18},{wch:20},{wch:18}];
+    XLSX.utils.book_append_sheet(wb, wsLog, 'Diário de Treinos');
+
+    // ── Sheet 5: Evolução por exercício ──
+    const evolRows = [['EXERCÍCIO','DATA','CARGA (kg)','VARIAÇÃO (kg)','SÉRIES','REPS']];
+    Object.entries(S.history).forEach(([exId, entries])=>{
+      const ex = exDB(exId);
+      const sorted = (entries||[]).slice().sort((a,b)=>a.date.localeCompare(b.date));
+      sorted.forEach((e, i)=>{
+        const prev = i>0 ? parseFloat(sorted[i-1].weight)||0 : parseFloat(e.weight)||0;
+        const curr = parseFloat(e.weight)||0;
+        const diff = i>0 ? (curr - prev).toFixed(1) : '—';
+        evolRows.push([ex.name, e.date, curr, diff, e.sets, e.reps]);
+      });
+    });
+    const wsEvol = XLSX.utils.aoa_to_sheet(evolRows);
+    wsEvol['!cols'] = [{wch:30},{wch:12},{wch:12},{wch:14},{wch:8},{wch:8}];
+    XLSX.utils.book_append_sheet(wb, wsEvol, 'Evolução');
+
+    XLSX.writeFile(wb, `meu-treino-relatorio-${dateStr}.xlsx`);
+    showToast('📊 Excel exportado com sucesso!');
+  } catch(e) {
+    console.error(e);
+    showToast('❌ Erro ao gerar Excel. Tente o backup JSON.');
+  }
 }
 
 function handleImportFile(inp){
