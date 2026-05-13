@@ -3,7 +3,7 @@
   "short_name": "Treino",
   "description": "Seu diário de treinos pessoal — registre séries, cargas e evolução",
   "start_url": "./index.html",
-  "display": "standalone",
+  "display": "fullscreen",
   "background_color": "#0d0d0d",
   "theme_color": "#0d0d0d",
   "orientation": "portrait-primary",
@@ -29,10 +29,5 @@
     "sports"
   ],
   "id": "/treino/",
-  "scope": "./",
-  "display_override": [
-    "window-controls-overlay",
-    "standalone",
-    "fullscreen"
-  ]
+  "scope": "./"
 }

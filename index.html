@@ -48,7 +48,7 @@
 (function(){
   const icon="data:image/svg+xml,"+encodeURIComponent("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='100' fill='%230d0d0d'/><text x='256' y='340' font-size='280' text-anchor='middle'>&#128170;</text><rect x='60' y='400' width='392' height='28' rx='14' fill='%23b5f23a'/></svg>");
   document.getElementById('appleIcon').href=icon;
-  const manifest={name:"Meu Treino",short_name:"Treino",description:"Seu diário de treinos pessoal",start_url:"./",display:"standalone",display_override:["window-controls-overlay","standalone","fullscreen"],background_color:"#0d0d0d",theme_color:"#0d0d0d",orientation:"portrait",icons:[{src:icon,sizes:"192x192",type:"image/svg+xml",purpose:"any maskable"},{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}]};
+  const manifest={name:"Meu Treino",short_name:"Treino",description:"Seu diário de treinos pessoal",start_url:"./",display:"fullscreen",background_color:"#0d0d0d",theme_color:"#0d0d0d",orientation:"portrait",icons:[{src:icon,sizes:"192x192",type:"image/svg+xml",purpose:"any maskable"},{src:icon,sizes:"512x512",type:"image/svg+xml",purpose:"any maskable"}]};
   // Use manifest.json if hosted, else blob fallback
   if(location.hostname !== 'localhost' && location.protocol !== 'file:'){
     document.getElementById('pwaManifest').href='./manifest.json';
@@ -701,12 +701,10 @@ function buildCal(c){
     const isToday=todayY===calYear&&todayM===calMonth&&todayD===d;
     const dt=new Date(calYear,calMonth,d);
     const isPast=dt<new Date(todayY,todayM,todayD);
+    // ONLY use dailyLogs for per-date status (never day-of-week exercises)
     const log=S.dailyLogs[ds]||{};
     const isTrained=!!log.trained;
     const hasActivity=!!(log.totalTime||log.extraActivity);
-    const dow=dt.getDay();
-    const dayExs=S.dayExercises[dow]||[];
-    const doneCount=dayExs.filter(e=>e.done).length;
 
     let cls='cal-day';
     if(isToday) cls+=' today';
@@ -714,10 +712,10 @@ function buildCal(c){
     else if(isPast&&!isToday) cls+=' missed';
     else if(!isPast&&!isToday) cls+=' future';
 
-    // dot indicator
+    // dot indicator — strictly date-specific, never day-of-week
     let dot='';
     if(isTrained) dot='<div class="cal-dot dot-trained"></div>';
-    else if(hasActivity||doneCount>0) dot='<div class="cal-dot dot-partial"></div>';
+    else if(hasActivity) dot='<div class="cal-dot dot-partial"></div>';
     else if(isPast&&!isToday) dot='<div class="cal-dot dot-missed"></div>';
 
     h+=`<div class="${cls}" onclick="openCalDay('${ds}')">${d}${dot}</div>`;
