@@ -1,10 +1,14 @@
 [
   {
-    "relation": ["delegate_permission/common.handle_all_urls"],
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
     "target": {
       "namespace": "android_app",
       "package_name": "com.treino.jefferson.app",
-      "sha256_cert_fingerprints": ["45:06:FA:33:A9:06:68:D4:0D:9E:1B:C4:10:8F:86:FF:B7:53:EF:A9:2B:8F:D4:09:FF:A8:D1:06:39:82:60:77"]
+      "sha256_cert_fingerprints": [
+        "45:06:FA:33:A9:06:68:D4:0D:9E:1B:C4:10:8F:86:FF:B7:53:EF:A9:2B:8F:D4:09:FF:A8:D1:06:39:82:60:77"
+      ]
     }
   }
 ]
