@@ -532,7 +532,24 @@ async function pushPhoto(b64){
   catch(e){ console.error('Photo sync error:',e); }
 }
 
-function todayStr(){ return new Date().toISOString().slice(0,10); }
+function localDateStr(d){
+  const dd=d||new Date();
+  const y=dd.getFullYear();
+  const m=String(dd.getMonth()+1).padStart(2,'0');
+  const day=String(dd.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+day;
+}
+function todayStr(){ return localDateStr(); }
+// Returns the specific calendar date for a given day-of-week (within current 7-day window)
+function dateForDow(dow){
+  const today=new Date();
+  const todayDow=today.getDay();
+  let diff=todayDow-dow;
+  if(diff<0) diff+=7;
+  const d=new Date(today);
+  d.setDate(d.getDate()-diff);
+  return localDateStr(d);
+}
 function exDB(id){ return S.exerciseDB[id]||{name:id,group:'peito',muscle:'',active:true}; }
 
 function recordHistory(exId,item){
@@ -619,7 +636,8 @@ function renderInicio(scr){
   const today=todayStr(), dow=new Date().getDay();
   const log=S.dailyLogs[today]||{};
   const dayExs=S.dayExercises[dow]||[];
-  const done=dayExs.filter(e=>e.done).length;
+  const daySession=getSession(dow);
+  const done=daySession.filter(e=>e.done).length;
   const pct=dayExs.length?Math.round(done/dayExs.length*100):0;
   const avatarHTML=p.photo
     ?`<img src="${p.photo}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;cursor:pointer" onclick="nav('config')">`
@@ -872,7 +890,10 @@ function renderTreino(scr){
   wrap.insertAdjacentHTML('beforeend',`<div class="page-header"><div class="page-title">TREINO</div><div class="page-sub">Registre sua sessão</div></div>`);
   const bar=document.createElement('div');bar.className='days-bar';
   DAYS_SHORT.forEach((label,d)=>{
-    const exs=S.dayExercises[d]||[], done=exs.filter(e=>e.done).length, isToday=d===new Date().getDay();
+    const exs=S.dayExercises[d]||[];
+    const sess=getSession(d);
+    const done=sess.filter(e=>e.done).length;
+    const isToday=d===new Date().getDay();
     const btn=document.createElement('button');
     btn.className='day-btn'+(d===activeDay?' active':'')+(done>0?' has-done':'');
     btn.innerHTML=`<span class="da">${label}${isToday?'•':''}</span><span class="dp">${done}/${exs.length}</span>`;
@@ -881,7 +902,13 @@ function renderTreino(scr){
   });
   wrap.appendChild(bar);
   const content=document.createElement('div');content.className='pad';content.style.cssText='flex:1;overflow-y:auto;overflow-x:hidden;scrollbar-width:none';
-  const dayExs=S.dayExercises[activeDay]||[];
+  const tmplExs=S.dayExercises[activeDay]||[];
+  const sessionExs=getSession(activeDay);
+  // Merge template + session for display
+  const dayExs=tmplExs.map((t,i)=>{
+    const s=sessionExs[i]||{exId:t.exId,sets:t.sets,reps:t.reps,weight:'',time:'',done:false};
+    return {...t,...s};
+  });
   if(!dayExs.length){
     content.innerHTML=`<div style="text-align:center;padding:60px 20px;color:var(--text3)"><div style="font-size:48px;margin-bottom:12px">😴</div><div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px">Nenhum exercício</div><div style="font-size:13px;margin-top:6px">Adicione via Lista de Treinos</div></div>`;
   } else {
@@ -918,15 +945,35 @@ function buildExCard(item,idx,ex){
   if(isCardio){
     const cl=document.createElement('div');cl.innerHTML='<div class="ctrl-lbl">⏱ Duração</div>';
     const w=document.createElement('div');w.className='weight-wrap';
-    const inp=document.createElement('input');inp.className='weight-input';inp.type='number';inp.inputMode='numeric';inp.placeholder='0';inp.value=item.time||'';inp.oninput=()=>{item.time=inp.value;save();};
+    const inp=document.createElement('input');inp.className='weight-input';inp.type='number';inp.inputMode='numeric';inp.placeholder='0';inp.value=item.time||'';inp.oninput=()=>{
+  item.time=inp.value;
+  const sess=getSession(activeDay);
+  if(sess[idx]) sess[idx].time=inp.value;
+  save();
+};
     const u=document.createElement('span');u.className='weight-unit';u.textContent='min';w.append(inp,u);cl.appendChild(w);card.appendChild(cl);
   } else {
     const ctrl=document.createElement('div');ctrl.className='ex-ctrl-row';
-    const gs=document.createElement('div');gs.innerHTML='<div class="ctrl-lbl">Séries</div>';gs.appendChild(mkStep(item.sets,1,20,v=>{item.sets=v;save();}));
-    const gr=document.createElement('div');gr.innerHTML='<div class="ctrl-lbl">Repetições</div>';gr.appendChild(mkStep(item.reps,1,60,v=>{item.reps=v;save();}));
+    const gs=document.createElement('div');gs.innerHTML='<div class="ctrl-lbl">Séries</div>';gs.appendChild(mkStep(item.sets,1,20,v=>{
+  item.sets=v;
+  const sess=getSession(activeDay);
+  if(sess[idx]) sess[idx].sets=v;
+  save();
+}));
+    const gr=document.createElement('div');gr.innerHTML='<div class="ctrl-lbl">Repetições</div>';gr.appendChild(mkStep(item.reps,1,60,v=>{
+  item.reps=v;
+  const sess=getSession(activeDay);
+  if(sess[idx]) sess[idx].reps=v;
+  save();
+}));
     const gw=document.createElement('div');gw.style.gridColumn='1/-1';gw.innerHTML='<div class="ctrl-lbl">Carga (kg)</div>';
     const ww=document.createElement('div');ww.className='weight-wrap';
-    const wi=document.createElement('input');wi.className='weight-input';wi.type='number';wi.inputMode='decimal';wi.placeholder='0';wi.value=item.weight||'';wi.oninput=()=>{item.weight=wi.value;save();};
+    const wi=document.createElement('input');wi.className='weight-input';wi.type='number';wi.inputMode='decimal';wi.placeholder='0';wi.value=item.weight||'';wi.oninput=()=>{
+  item.weight=wi.value;
+  const sess=getSession(activeDay);
+  if(sess[idx]) sess[idx].weight=wi.value;
+  save();
+};
     const wu=document.createElement('span');wu.className='weight-unit';wu.textContent='kg';ww.append(wi,wu);gw.appendChild(ww);
     ctrl.append(gs,gr,gw);card.appendChild(ctrl);
   }
@@ -942,7 +989,27 @@ function mkStep(init,min,max,cb){
   w.append(m,d,p);return w;
 }
 
-function toggleDone(day,idx){const item=S.dayExercises[day][idx];item.done=!item.done;if(item.done)recordHistory(item.exId,item);save();render();}
+function getSession(dow){
+  const ds=dateForDow(dow);
+  if(!S.dailyLogs[ds]) S.dailyLogs[ds]={trained:false};
+  const tmpl=S.dayExercises[dow]||[];
+  if(!S.dailyLogs[ds].session || S.dailyLogs[ds].session.length!==tmpl.length){
+    // Init session from template (preserve existing if same exId)
+    const existing=S.dailyLogs[ds].session||[];
+    S.dailyLogs[ds].session=tmpl.map((t,i)=>{
+      const ex=existing.find(e=>e.exId===t.exId);
+      return ex ? ex : {exId:t.exId,sets:t.sets,reps:t.reps,weight:'',time:'',done:false};
+    });
+  }
+  return S.dailyLogs[ds].session;
+}
+
+function toggleDone(day,idx){
+  const session=getSession(day);
+  session[idx].done=!session[idx].done;
+  if(session[idx].done) recordHistory(session[idx].exId,session[idx]);
+  save();render();
+}
 function removeEx(day,idx){S.dayExercises[day].splice(idx,1);save();render();}
 
 // ══════════════════════════════════════
