@@ -998,9 +998,11 @@ function removeExFromPlan(dow,idx){
   const plan=getActivePlan(); if(!plan) return;
   if(!plan.days[dow]) return;
   plan.days[dow].splice(idx,1);
-  // invalidate today's session so it regenerates from updated template
+  // PRESERVE session — just remove that specific index
   const ds=dateForDow(dow);
-  if(S.dailyLogs[ds]) delete S.dailyLogs[ds].session;
+  if(S.dailyLogs[ds]?.session){
+    S.dailyLogs[ds].session.splice(idx,1);
+  }
   save(); render();
 }
 
@@ -1024,7 +1026,14 @@ function openExConfig(dow,idx){
       item.rest=parseInt(document.getElementById('ecRest').value)||60;
       item.technique=document.getElementById('ecTech').value;
       item.obs=document.getElementById('ecObs').value;
-      const ds=dateForDow(dow); if(S.dailyLogs[ds]) delete S.dailyLogs[ds].session;
+      item.toFailure=_ecFailure;
+      // Update session entry without wiping other entries
+      const ds=dateForDow(dow);
+      if(S.dailyLogs[ds]?.session?.[idx]){
+        const s=S.dailyLogs[ds].session[idx];
+        s.sets=item.sets; s.reps=item.reps; s.obs=item.obs;
+        // Don't reset done/weight — preserve what user already entered
+      }
       save(); closeModal(); render();
     }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]
   );
@@ -1060,7 +1069,11 @@ function doSwap(dow,idx,newId){
   const plan=getActivePlan(); if(!plan) return;
   const old=plan.days[dow][idx];
   plan.days[dow][idx]={exId:newId,sets:old.sets,reps:old.reps,weight:'',time:'',obs:'',rest:old.rest||60,toFailure:false,technique:'none'};
-  const ds=dateForDow(dow); if(S.dailyLogs[ds]) delete S.dailyLogs[ds].session;
+  // PRESERVE session — only replace that specific entry, keep others intact
+  const ds=dateForDow(dow);
+  if(S.dailyLogs[ds]?.session){
+    S.dailyLogs[ds].session[idx]={exId:newId,sets:old.sets,reps:old.reps,weight:'',time:'',done:false,obs:''};
+  }
   save(); closeModal(); render();
 }
 
@@ -1082,7 +1095,12 @@ function addExToPlan(dow,exId){
   const plan=getActivePlan(); if(!plan) return;
   if(!plan.days[dow]) plan.days[dow]=[];
   plan.days[dow].push({exId,sets:4,reps:12,weight:'',time:'',obs:'',rest:60,toFailure:false,technique:'none'});
-  const ds=dateForDow(dow); if(S.dailyLogs[ds]) delete S.dailyLogs[ds].session;
+  // PRESERVE existing session — just append new blank entry instead of wiping
+  const ds=dateForDow(dow);
+  if(S.dailyLogs[ds]?.session){
+    S.dailyLogs[ds].session.push({exId,sets:4,reps:12,weight:'',time:'',done:false,obs:''});
+  }
+  // If no session yet, getSession() will build it fresh from template — that's fine
   save(); closeModal(); showToast('✅ Exercício adicionado!'); if(currentTab==='treino') render();
 }
 
