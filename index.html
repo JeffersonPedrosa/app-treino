@@ -145,6 +145,11 @@ textarea.input{resize:none;min-height:70px;font-size:13px}
 .cal-dot.dot-green{background:var(--accent)}
 .cal-dot.dot-orange{background:var(--orange)}
 .cal-dot.dot-red{background:var(--red);opacity:.5}
+.cal-dot.dot-blue{background:var(--blue)}
+.cal-dots{display:flex;gap:3px;margin-top:1px;align-items:center;justify-content:center}
+.cal-dots .cal-dot{margin-top:0}
+@keyframes slideL{from{opacity:0;transform:translateX(34px)}to{opacity:1;transform:translateX(0)}}
+@keyframes slideR{from{opacity:0;transform:translateX(-34px)}to{opacity:1;transform:translateX(0)}}
 
 /* ── SUMMARY ── */
 .summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
@@ -562,7 +567,7 @@ function getSession(dow, dateStr){
   const log=S.dailyLogs[ds];
   if(!log.session){
     log.session=tmpl.map(t=>({exId:t.exId,sets:t.sets,reps:t.reps,weight:t.weight||'',time:t.time||'',done:false,obs:t.obs||''}));
-  } else if(log.session.length!==tmpl.length){
+  } else if(log.session.length!==tmpl.length || log.session.some((x,i)=>!tmpl[i]||x.exId!==tmpl[i].exId)){
     log.session=tmpl.map(t=>{
       const ex=log.session.find(e=>e.exId===t.exId);
       return ex?{...ex}:{exId:t.exId,sets:t.sets,reps:t.reps,weight:t.weight||'',time:t.time||'',done:false,obs:t.obs||''};
@@ -606,7 +611,7 @@ function loadState(){
     S.activePlanId=plan.id;
     delete S.dayExercises;
   }
-  if(!S.plans||!S.plans.length){ S.plans=[defaultPlan()]; S.activePlanId=S.plans[0].id; }
+  if(!S.plans){ S.plans=[defaultPlan()]; S.activePlanId=S.plans[0].id; }
   if(!S.history) S.history={};
   if(!S.dailyLogs) S.dailyLogs={};
   if(!S.weightHistory) S.weightHistory=[];
@@ -743,10 +748,10 @@ function renderInicio(scr){
   </div>
   <div class="pad">
     ${planBanner}
-    <div class="card">
+    <div class="card" id="calCard" style="touch-action:pan-y">
       <div class="cal-nav">
         <button class="cal-nav-btn" onclick="calPrev()">‹</button>
-        <span class="cal-month">${MONTHS_PT[calMonth].toUpperCase()} ${calYear}</span>
+        <span class="cal-month" id="calMonthLbl">${MONTHS_PT[calMonth].toUpperCase()} ${calYear}</span>
         <button class="cal-nav-btn" onclick="calNext()">›</button>
       </div>
       <div id="calGrid"></div>
@@ -761,19 +766,27 @@ function renderInicio(scr){
         </div><div class="sum-lbl">Tempo Treino</div>
       </div>
       <div class="sum-card">
-        <div class="sum-val" style="font-size:11px;font-family:DM Sans;font-weight:700;padding-top:6px;color:${log.extraActivity?'var(--orange)':'var(--text3)'}">
-          ${log.extraActivity||'—'}
-        </div><div class="sum-lbl">${log.extraTime?log.extraTime+' min':'Atividade Extra'}</div>
+        <div class="sum-val" style="font-size:11px;font-family:DM Sans;font-weight:700;padding-top:6px;color:${getOthers(log).length?'var(--blue)':'var(--text3)'}">
+          ${getOthers(log).map(o=>o.a).join(', ')||'—'}
+        </div><div class="sum-lbl">${(()=>{const m=getOthers(log).reduce((a,o)=>a+(parseInt(o.t)||0),0);return m?m+' min':'Outros Exercícios';})()}</div>
       </div>
     </div>
     ${log.trained?`<div class="card-sm row" style="border-color:var(--accent);background:var(--accent-bg);margin-bottom:12px;gap:8px"><span>✅</span><span style="font-size:13px;font-weight:600">Dia registrado como concluído!</span></div>`:''}
     <button class="btn btn-accent btn-full" onclick="openEndDay()" style="margin-bottom:10px">${log.trained?'✏️ Editar Registro':'🏁 Registrar Conclusão do Dia'}</button>
+    <button class="btn btn-blue btn-full" onclick="openOthersFor(todayStr())" style="margin-bottom:10px">⚽ Registrar Outros Exercícios</button>
     <button class="btn btn-ghost btn-full" onclick="nav('treino')">💪 Ir para o Treino de Hoje</button>
     <div id="recentWrap"></div>
   </div>`;
   scr.appendChild(div);
   buildCal(document.getElementById('calGrid'));
   buildRecent(document.getElementById('recentWrap'));
+  attachCalSwipe();
+}
+
+function getOthers(log){
+  const arr=(log&&log.others?log.others.slice():[]);
+  if(log&&log.extraActivity && !arr.some(o=>o.a===log.extraActivity)) arr.push({a:log.extraActivity,t:log.extraTime||''});
+  return arr;
 }
 
 function getPlanDaysLeft(plan){
@@ -799,28 +812,48 @@ function buildCal(c){
     const isPast=dt<new Date(todayY,todayM,todayD);
     const log=S.dailyLogs[ds]||{};
     let cls='cal-day'; if(isToday)cls+=' today'; if(log.trained)cls+=' trained'; else if(isPast&&!isToday)cls+=' missed'; else if(!isPast&&!isToday)cls+=' future';
-    let dot='';
-    if(log.trained) dot='<div class="cal-dot dot-green"></div>';
-    else if(log.totalTime||log.extraActivity) dot='<div class="cal-dot dot-orange"></div>';
-    else if(isPast&&!isToday) dot='<div class="cal-dot dot-red"></div>';
+    const hasOther=getOthers(log).length>0;
+    let dots='';
+    if(log.trained) dots+='<div class="cal-dot dot-green"></div>';
+    else if(!hasOther && log.totalTime) dots+='<div class="cal-dot dot-orange"></div>';
+    if(hasOther) dots+='<div class="cal-dot dot-blue"></div>';
+    if(!dots && isPast && !isToday) dots='<div class="cal-dot dot-red"></div>';
+    const dot=dots?`<div class="cal-dots">${dots}</div>`:'';
     h+=`<div class="${cls}" onclick="openCalDay('${ds}')">${d}${dot}</div>`;
   }
   h+='</div>'; c.innerHTML=h;
 }
 
 function buildRecent(c){
-  const entries=Object.entries(S.dailyLogs).filter(([,v])=>v.trained||v.totalTime||v.extraActivity).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5);
+  const entries=Object.entries(S.dailyLogs).filter(([,v])=>v.trained||v.totalTime||getOthers(v).length).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,5);
   if(!entries.length){c.innerHTML='';return;}
   let h='<div class="section-label" style="margin-top:18px">Atividade Recente</div>';
   entries.forEach(([date,log])=>{
     const d=new Date(date+'T12:00:00');
-    h+=`<div class="card-sm row-sb"><div><div style="font-weight:600;font-size:13px">${d.getDate()} ${MONTHS_PT[d.getMonth()].slice(0,3)} — ${DAYS_SHORT[d.getDay()]}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${log.totalTime?log.totalTime+' min':''}${log.extraActivity?' • '+log.extraActivity:''}${!log.totalTime&&!log.extraActivity?'Registrado':''}</div></div>${log.trained?'<span class="tag tag-green">✓ Feito</span>':''}</div>`;
+    h+=`<div class="card-sm row-sb"><div><div style="font-weight:600;font-size:13px">${d.getDate()} ${MONTHS_PT[d.getMonth()].slice(0,3)} — ${DAYS_SHORT[d.getDay()]}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${log.totalTime?log.totalTime+' min':''}${getOthers(log).map(o=>' • '+o.a+(o.t?' '+o.t+'min':'')).join('')}${!log.totalTime&&!getOthers(log).length?'Registrado':''}</div></div>${log.trained?'<span class="tag tag-green">✓ Feito</span>':''}</div>`;
   });
   c.innerHTML=h;
 }
 
-function calPrev(){if(calMonth===0){calMonth=11;calYear--;}else calMonth--;render();}
-function calNext(){if(calMonth===11){calMonth=0;calYear++;}else calMonth++;render();}
+function refreshCal(dir){
+  const lbl=document.getElementById('calMonthLbl'), g=document.getElementById('calGrid');
+  if(!lbl||!g){render();return;}
+  lbl.textContent=MONTHS_PT[calMonth].toUpperCase()+' '+calYear;
+  buildCal(g);
+  g.style.animation='none'; void g.offsetHeight;
+  g.style.animation=(dir>0?'slideL':'slideR')+' .25s ease';
+}
+function calPrev(){if(calMonth===0){calMonth=11;calYear--;}else calMonth--;refreshCal(-1);}
+function calNext(){if(calMonth===11){calMonth=0;calYear++;}else calMonth++;refreshCal(1);}
+function attachCalSwipe(){
+  const el=document.getElementById('calCard'); if(!el) return;
+  let sx=0,sy=0,t0=0;
+  el.addEventListener('touchstart',e=>{const t=e.changedTouches[0];sx=t.clientX;sy=t.clientY;t0=Date.now();},{passive:true});
+  el.addEventListener('touchend',e=>{
+    const t=e.changedTouches[0], dx=t.clientX-sx, dy=t.clientY-sy;
+    if(Math.abs(dx)>50 && Math.abs(dx)>Math.abs(dy)*1.5 && Date.now()-t0<800){ if(dx<0) calNext(); else calPrev(); }
+  },{passive:true});
+}
 
 function openCalDay(dateStr){
   const dt=new Date(dateStr+'T12:00:00'), dow=dt.getDay(), log=S.dailyLogs[dateStr]||{};
@@ -831,7 +864,7 @@ function openCalDay(dateStr){
   const pct=total?Math.round(doneCount/total*100):0;
   let html='';
   if(log.trained) html+=`<div class="card-sm row" style="border-color:var(--accent);background:var(--accent-bg);margin-bottom:10px;gap:8px"><span>✅</span><span style="font-size:13px;font-weight:600">Dia concluído!</span></div>`;
-  if(log.totalTime||log.extraActivity) html+=`<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">${log.totalTime?`<span class="tag tag-green">⏱ ${log.totalTime} min</span>`:''}${log.extraActivity?`<span class="tag tag-orange">🏃 ${log.extraActivity}${log.extraTime?' '+log.extraTime+'min':''}</span>`:''}</div>`;
+  if(log.totalTime||getOthers(log).length) html+=`<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">${log.totalTime?`<span class="tag tag-green">⏱ ${log.totalTime} min</span>`:''}${getOthers(log).map(o=>`<span class="tag tag-blue">⚽ ${o.a}${o.t?' '+o.t+'min':''}</span>`).join('')}</div>`;
   html+=`<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:5px"><span>${doneCount}/${total} exercícios</span><span>${pct}%</span></div><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div></div>`;
   html+='<div class="section-label">Treino do Dia</div>';
   if(!dayExs.length) html+='<div style="text-align:center;padding:20px;color:var(--text3)">Nenhum exercício neste dia</div>';
@@ -843,10 +876,44 @@ function openCalDay(dateStr){
   const btns=[{label:'Fechar',cls:'btn-ghost',fn:closeModal}];
   if(isToday) btns.unshift({label:'💪 Treinar Agora',cls:'btn-accent',fn:()=>{closeModal();nav('treino');}});
   else if(isPast&&!log.trained) btns.unshift({label:'✅ Registrar Dia',cls:'btn-accent',fn:()=>{closeModal();openEndDayFor(dateStr);}});
+  if(isToday||isPast) btns.splice(btns.length-1,0,{label:'⚽ Outros',cls:'btn-blue',fn:()=>{closeModal();openOthersFor(dateStr);}});
   showModal(`${dt.getDate()} de ${MONTHS_PT[dt.getMonth()]} — ${DAYS_FULL[dow]}`, html, btns);
 }
 
 function openEndDay(){ openEndDayFor(todayStr()); }
+
+function openOthersFor(ds){
+  if(!S.dailyLogs[ds]) S.dailyLogs[ds]={trained:false};
+  const cur=S.dailyLogs[ds].others||[];
+  const dt=new Date(ds+'T12:00:00');
+  const rows=ACTIVITIES.map((a,i)=>{
+    const c=cur.find(o=>o.a===a);
+    return `<div class="chk-item${c?' selected':''}" id="oth_${i}" onclick="toggleOth(${i})">
+      <div class="chk-box" id="othBox_${i}">${c?'✓':''}</div>
+      <div style="flex:1;font-weight:600;font-size:14px">${a}</div>
+      <div class="weight-wrap" style="width:96px" onclick="event.stopPropagation()"><input class="weight-input" id="othT_${i}" type="number" inputmode="numeric" placeholder="0" value="${c&&c.t?c.t:''}" oninput="if(this.value) markOth(${i})"><span class="weight-unit">min</span></div>
+    </div>`;}).join('');
+  showModal(`Outros — ${dt.getDate()}/${dt.getMonth()+1}`,
+    `<div style="font-size:12px;color:var(--text3);margin-bottom:12px">Marque a(s) atividade(s) e informe o tempo. O dia ganha uma bolinha 🔵 no calendário.</div>${rows}`,
+    [{label:'💾 Salvar',cls:'btn-accent',fn:()=>{
+      const out=[];
+      ACTIVITIES.forEach((a,i)=>{
+        const sel=document.getElementById('oth_'+i).classList.contains('selected');
+        const t=document.getElementById('othT_'+i).value;
+        if(sel||(parseInt(t)>0)) out.push({a,t});
+      });
+      S.dailyLogs[ds].others=out;
+      save(); closeModal(); render(); showToast(out.length?'✅ Registrado!':'Registro removido');
+    }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]);
+}
+function toggleOth(i){
+  const el=document.getElementById('oth_'+i), box=document.getElementById('othBox_'+i);
+  el.classList.toggle('selected'); box.textContent=el.classList.contains('selected')?'✓':'';
+}
+function markOth(i){
+  const el=document.getElementById('oth_'+i), box=document.getElementById('othBox_'+i);
+  el.classList.add('selected'); box.textContent='✓';
+}
 
 function openEndDayFor(dateStr){
   if(!S.dailyLogs[dateStr]) S.dailyLogs[dateStr]={trained:false};
@@ -987,11 +1054,19 @@ function mkStep(init,min,max,cb){
   w.append(m,d,p); return w;
 }
 
+function renderKeepScroll(){
+  const sc=document.querySelector('#screen .pad');
+  const top=sc?sc.scrollTop:0;
+  render();
+  const sc2=document.querySelector('#screen .pad');
+  if(sc2) sc2.scrollTop=top;
+}
+
 function toggleDone(dow,idx){
   const sess=getSession(dow);
   sess[idx].done=!sess[idx].done;
   if(sess[idx].done) recordHistory(sess[idx].exId,sess[idx]);
-  save(); render();
+  save(); renderKeepScroll();
 }
 
 function removeExFromPlan(dow,idx){
@@ -1003,12 +1078,12 @@ function removeExFromPlan(dow,idx){
   if(S.dailyLogs[ds]?.session){
     S.dailyLogs[ds].session.splice(idx,1);
   }
-  save(); render();
+  save(); renderKeepScroll();
 }
 
 function openExConfig(dow,idx){
   const plan=getActivePlan(); if(!plan) return;
-  const item=plan.days[dow][idx]; const ex=exDB(item.exId);
+  const item=plan.days[dow][idx]; const ex=exDB(item.exId); _ecFailure=!!item.toFailure;
   showModal(`⚙️ ${ex.name}`,`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="input-group" style="margin-bottom:0"><div class="input-label">Séries</div><input class="input" id="ecSets" type="number" inputmode="numeric" value="${item.sets||4}"></div>
@@ -1034,7 +1109,7 @@ function openExConfig(dow,idx){
         s.sets=item.sets; s.reps=item.reps; s.obs=item.obs;
         // Don't reset done/weight — preserve what user already entered
       }
-      save(); closeModal(); render();
+      save(); closeModal(); renderKeepScroll();
     }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]
   );
 }
@@ -1074,7 +1149,7 @@ function doSwap(dow,idx,newId){
   if(S.dailyLogs[ds]?.session){
     S.dailyLogs[ds].session[idx]={exId:newId,sets:old.sets,reps:old.reps,weight:'',time:'',done:false,obs:''};
   }
-  save(); closeModal(); render();
+  save(); closeModal(); renderKeepScroll();
 }
 
 function openAddExToPlan(dow){
@@ -1101,7 +1176,7 @@ function addExToPlan(dow,exId){
     S.dailyLogs[ds].session.push({exId,sets:4,reps:12,weight:'',time:'',done:false,obs:''});
   }
   // If no session yet, getSession() will build it fresh from template — that's fine
-  save(); closeModal(); showToast('✅ Exercício adicionado!'); if(currentTab==='treino') render();
+  save(); closeModal(); showToast('✅ Exercício adicionado!'); if(currentTab==='treino') renderKeepScroll();
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1145,6 +1220,7 @@ function renderPlanCard(plan, archived=false){
       <button class="btn btn-ghost btn-sm" onclick="openEditPlan('${plan.id}')">✏️ Editar</button>
       <button class="btn btn-blue btn-sm" onclick="duplicatePlan('${plan.id}')">⧉ Duplicar</button>
       ${!archived?`<button class="btn btn-ghost btn-sm" onclick="archivePlan('${plan.id}')">📦 Arquivar</button>`:`<button class="btn btn-ghost btn-sm" onclick="restorePlan('${plan.id}')">↩ Restaurar</button>`}
+      <button class="btn btn-danger btn-sm" onclick="deletePlan('${plan.id}')">🗑 Excluir</button>
     </div>
   </div>`;
 }
@@ -1159,21 +1235,17 @@ function openEditPlan(planId){
   editPlanForm(plan, false);
 }
 
-function editPlanForm(plan, isNew){
-  const daysHtml=DAYS_FULL.map((d,i)=>{
-    const exs=(plan.days&&plan.days[i])||[];
-    return `<div class="card-sm" style="margin-bottom:8px">
-      <div class="row-sb">
-        <div style="font-weight:600;font-size:13px">${d}<span style="font-size:11px;color:var(--text3);margin-left:8px">${exs.length} exercício${exs.length!==1?'s':''}</span></div>
-        <button class="btn btn-ghost btn-sm" onclick="openAddExToNewPlan('${plan.id}',${i})">+ Add</button>
-      </div>
-      <div id="planDay_${i}" style="margin-top:6px">${exs.map((e,ei)=>{const ex=exDB(e.exId);return `<div style="font-size:12px;color:var(--text2);display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)"><span>${ex.name}</span><span style="color:var(--text3)">${e.sets}×${e.reps}</span></div>`;}).join('')}</div>
-    </div>`;
-  }).join('');
-
-  // Store temp plan
+function editPlanForm(plan,isNew){
   window._tmpPlan=JSON.parse(JSON.stringify(plan));
   window._tmpPlanIsNew=isNew;
+  if(!window._tmpPlan.days) window._tmpPlan.days={};
+  const daysHtml=DAYS_FULL.map((d,i)=>`<div class="card-sm" style="margin-bottom:8px">
+      <div class="row-sb">
+        <div style="font-weight:600;font-size:13px">${d}<span id="planCnt_${i}" style="font-size:11px;color:var(--text3);margin-left:8px"></span></div>
+        <button class="btn btn-ghost btn-sm" onclick="openAddExToNewPlan(${i})">+ Add</button>
+      </div>
+      <div id="planDay_${i}" style="margin-top:6px"></div>
+    </div>`).join('');
 
   showModal(isNew?'Novo Plano':'Editar Plano',`
     <div class="input-group"><div class="input-label">Nome do Plano</div><input class="input" id="pName" placeholder="Ex: Treino A — Hipertrofia" value="${plan.name||''}"></div>
@@ -1189,8 +1261,8 @@ function editPlanForm(plan, isNew){
       p.goal=document.getElementById('pGoal').value;
       p.durationDays=parseInt(document.getElementById('pDur').value)||0;
       if(window._tmpPlanIsNew){
-        p.id=makePlanId(); p.startDate=localDateStr(); p.active=!S.plans.find(pl=>pl.active); p.archived=false;
-        if(!S.plans.length) p.active=true;
+        p.id=makePlanId(); p.startDate=localDateStr(); p.archived=false;
+        p.active=!S.plans.some(pl=>pl.active&&!pl.archived);
         S.plans.push(p);
         if(p.active) S.activePlanId=p.id;
       } else {
@@ -1200,55 +1272,98 @@ function editPlanForm(plan, isNew){
       save(); closeModal(); render();
     }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]
   );
+  DAYS_FULL.forEach((_,i)=>refreshTmpPlanDay(i));
 }
 
-function openAddExToNewPlan(planId,dow){
+function refreshTmpPlanDay(dow){
+  const p=window._tmpPlan; if(!p) return;
+  const exs=(p.days&&p.days[dow])||[];
+  const el=document.getElementById('planDay_'+dow), cnt=document.getElementById('planCnt_'+dow);
+  if(cnt) cnt.textContent=exs.length+' exercício'+(exs.length!==1?'s':'');
+  if(!el) return;
+  el.innerHTML=exs.length?exs.map((e,ei)=>{
+    const ex=exDB(e.exId);
+    return `<div style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+      <span style="flex:1;min-width:0">${ex.name}</span>
+      <span style="color:var(--text3)">${e.sets}×${e.reps}</span>
+      <button class="icon-btn" style="color:var(--red);width:24px;height:24px;font-size:11px" onclick="removeFromTmpPlan(${dow},${ei})">✕</button>
+    </div>`;}).join(''):'<div style="font-size:11px;color:var(--text3)">Dia de descanso</div>';
+}
+
+function removeFromTmpPlan(dow,ei){
+  const p=window._tmpPlan; if(!p||!p.days||!p.days[dow]) return;
+  p.days[dow].splice(ei,1);
+  refreshTmpPlanDay(dow);
+}
+
+function closeOverlay2(){
+  document.getElementById('overlay2')?.remove();
+  document.getElementById('modal2')?.remove();
+}
+
+function openAddExToNewPlan(dow){
+  closeOverlay2();
   let selGrp='peito';
-  const getPlan=()=> planId==='_new'?window._tmpPlan:S.plans.find(p=>p.id===planId);
   const rp=()=>{
     const list=Object.entries(S.exerciseDB).filter(([,ex])=>ex.group===selGrp&&ex.active).sort((a,b)=>a[1].name.localeCompare(b[1].name));
     const body=document.getElementById('modalBody2'); if(!body) return;
     body.innerHTML=`<div class="tgl-group" style="flex-wrap:wrap">${GROUP_ORDER.map(g=>`<button class="tgl-btn${selGrp===g?' active':''}" onclick="window._pg2('${g}')">${GROUP_LABELS[g]}</button>`).join('')}</div>
-      ${list.map(([id,ex])=>`<div class="list-item" onclick="addToTmpPlan('${planId}',${dow},'${id}')"><div class="li-info"><div class="li-name">${ex.name}</div><div class="li-sub">${ex.muscle}</div></div><span style="font-size:20px;color:var(--accent)">+</span></div>`).join('')}`;
+      ${list.map(([id,ex])=>`<div class="list-item" onclick="addToTmpPlan(${dow},'${id}')"><div class="li-info"><div class="li-name">${ex.name}</div><div class="li-sub">${ex.muscle}</div></div><span style="font-size:20px;color:var(--accent)">+</span></div>`).join('')}
+      ${!list.length?'<div style="text-align:center;padding:30px;color:var(--text3)">Nenhum exercício ativo</div>':''}`;
   };
   window._pg2=(g)=>{selGrp=g;rp();};
-  // Show a second modal layer
   const overlay2=document.createElement('div');
+  overlay2.id='overlay2';
   overlay2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:92;backdrop-filter:blur(3px)';
-  overlay2.id='overlay2'; overlay2.onclick=()=>overlay2.remove();
+  overlay2.onclick=closeOverlay2;
   const modal2=document.createElement('div');
+  modal2.id='modal2';
   modal2.style.cssText='position:fixed;bottom:0;left:0;right:0;z-index:93;background:var(--surface);border-radius:22px 22px 0 0;border-top:1px solid var(--border);max-height:90vh;display:flex;flex-direction:column';
   modal2.innerHTML=`<div style="width:36px;height:4px;background:var(--border2);border-radius:4px;margin:10px auto 0"></div>
     <div style="padding:14px 18px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
-      <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent)">+ ${DAYS_SHORT[dow]}</span>
-      <button class="icon-btn" onclick="document.getElementById('overlay2').remove()" style="width:32px;height:32px;font-size:16px">✕</button>
+      <span style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:1.5px;color:var(--accent)">+ ${DAYS_FULL[dow]}</span>
+      <button class="icon-btn" onclick="closeOverlay2()" style="width:32px;height:32px;font-size:16px">✕</button>
     </div>
     <div id="modalBody2" style="overflow-y:auto;padding:14px;flex:1;scrollbar-width:none"></div>`;
-  document.body.append(overlay2,modal2); rp();
+  document.body.append(overlay2,modal2);
+  rp();
 }
 
-function addToTmpPlan(planId,dow,exId){
-  const plan=planId==='_new'?window._tmpPlan:S.plans.find(p=>p.id===planId);
-  if(!plan) return;
-  if(!plan.days[dow]) plan.days[dow]=[];
-  plan.days[dow].push({exId,sets:4,reps:12,weight:'',time:'',obs:'',rest:60,toFailure:false,technique:'none'});
-  // Update the day display in modal
-  const dayEl=document.getElementById(`planDay_${dow}`);
-  if(dayEl){
-    const ex=exDB(exId);
-    dayEl.insertAdjacentHTML('beforeend',`<div style="font-size:12px;color:var(--text2);display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border)"><span>${ex.name}</span><span style="color:var(--text3)">4×12</span></div>`);
-  }
-  // Update day header count
-  const hdr=document.querySelector(`#planDay_${dow}`)?.parentElement?.querySelector('span');
-  document.getElementById('overlay2')?.remove();
+function addToTmpPlan(dow,exId){
+  const p=window._tmpPlan; if(!p) return;
+  if(!p.days) p.days={};
+  if(!p.days[dow]) p.days[dow]=[];
+  p.days[dow].push({exId,sets:4,reps:12,weight:'',time:'',obs:'',rest:60,toFailure:false,technique:'none'});
+  refreshTmpPlanDay(dow);
+  closeOverlay2();
   showToast('✅ Exercício adicionado!');
+}
+
+function deletePlan(planId){
+  const plan=S.plans.find(p=>p.id===planId); if(!plan) return;
+  const wasActive=S.activePlanId===planId&&plan.active;
+  showModal('🗑 Excluir Plano',`<div style="text-align:center;padding:16px 0">
+      <div style="font-size:44px;margin-bottom:10px">🗑</div>
+      <div style="font-size:16px;font-weight:700">Excluir "${plan.name}"?</div>
+      <div style="font-size:13px;color:var(--text3);margin-top:8px;line-height:1.5">O plano será removido definitivamente. O histórico de cargas e os dias já registrados no calendário são mantidos.${wasActive?'<br><br>Este é o plano ativo — outro plano disponível será ativado.':''}</div>
+    </div>`,
+    [{label:'🗑 Excluir',cls:'btn-danger',fn:()=>{
+      S.plans=S.plans.filter(p=>p.id!==planId);
+      if(S.activePlanId===planId){
+        const next=S.plans.find(p=>!p.archived);
+        S.activePlanId=next?next.id:null;
+        S.plans.forEach(p=>{p.active=!!next&&p.id===next.id;});
+      }
+      save(); closeModal(); render(); showToast('🗑 Plano excluído');
+    }},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]);
 }
 
 function activatePlan(planId){
   S.plans.forEach(p=>{p.active=p.id===planId;});
   S.activePlanId=planId;
-  // Reset all sessions so new plan applies cleanly
-  Object.keys(S.dailyLogs).forEach(ds=>{if(S.dailyLogs[ds]) delete S.dailyLogs[ds].session;});
+  // Reseta só sessões de hoje em diante (preserva o histórico dos dias passados)
+  const _t=todayStr();
+  Object.keys(S.dailyLogs).forEach(ds=>{if(ds>=_t && S.dailyLogs[ds]) delete S.dailyLogs[ds].session;});
   save(); render(); showToast('✅ Plano ativado!');
 }
 
@@ -1617,20 +1732,42 @@ function saveProfile(){
   save(); showToast('✅ Perfil salvo!'); render();
 }
 
-function openExerciseDB(){
-  let selGrp='peito';
+function openExerciseDB(grp){
+  let selGrp=grp||window._dbGrp||'peito';
+  window._dbGrp=selGrp;
   const renderDB=()=>{
     const exs=Object.entries(S.exerciseDB).filter(([,e])=>e.group===selGrp).sort((a,b)=>a[1].name.localeCompare(b[1].name));
     const body=document.getElementById('modalBody'); if(!body) return;
     const active=exs.filter(([,e])=>e.active), inactive=exs.filter(([,e])=>!e.active);
-    let html=`<div class="tgl-group" style="flex-wrap:wrap">${GROUP_ORDER.map(g=>`<button class="tgl-btn${selGrp===g?' active':''}" onclick="window._dbg('${g}')">${GROUP_LABELS[g]}</button>`).join('')}</div>`;
-    const renderGrp=(list,lbl)=>{if(!list.length)return '';return `<div class="section-label">${lbl}</div>`+list.map(([id,ex])=>`<div class="list-item${ex.active?'':' inactive'}"><div class="li-info"><div class="li-name">${ex.name}</div><div class="li-sub">${ex.muscle}</div></div><label class="switch" onclick="event.stopPropagation()"><input type="checkbox" ${ex.active?'checked':''} onchange="S.exerciseDB['${id}'].active=this.checked;save();"><div class="switch-track"></div></label></div>`).join('');};
-    html+=renderGrp(active,'Ativos'); html+=renderGrp(inactive,'Inativos');
+    let html=`<div class="tgl-group" style="flex-wrap:wrap">${GROUP_ORDER.map(g=>`<button class="tgl-btn${selGrp===g?' active':''}" onclick="window._dbg('${g}')">${GROUP_LABELS[g]}</button>`).join('')}</div>
+      <button class="btn btn-accent btn-full" style="margin-bottom:12px" onclick="openNewExercise('${selGrp}')">+ Novo exercício em ${GROUP_LABELS[selGrp]}</button>`;
+    const renderGrp=(list,lbl)=>{
+      if(!list.length) return '';
+      return `<div class="section-label">${lbl}</div>`+list.map(([id,ex])=>`<div class="list-item${ex.active?'':' inactive'}"><div class="li-info"><div class="li-name">${ex.name}${ex.custom?' <span class="tag tag-purple" style="margin-left:4px">Meu</span>':''}</div><div class="li-sub">${ex.muscle||''}</div></div><label class="switch" onclick="event.stopPropagation()"><input type="checkbox" ${ex.active?'checked':''} onchange="S.exerciseDB['${id}'].active=this.checked;save();"><div class="switch-track"></div></label></div>`).join('');
+    };
+    html+=renderGrp(active,'Ativos')+renderGrp(inactive,'Inativos');
     body.innerHTML=html;
   };
-  window._dbg=(g)=>{selGrp=g;renderDB();};
-  showModal('🏋️ Exercícios','',
-    [{label:'Fechar',cls:'btn-ghost',fn:closeModal}]); renderDB();
+  window._dbg=(g)=>{selGrp=g;window._dbGrp=g;renderDB();};
+  showModal('🏋️ Exercícios','',[{label:'Fechar',cls:'btn-ghost',fn:closeModal}]);
+  renderDB();
+}
+
+function openNewExercise(grp){
+  showModal(`+ Novo — ${GROUP_LABELS[grp]}`,`
+    <div class="input-group"><div class="input-label">Nome do exercício</div><input class="input" id="neName" placeholder="Ex: Supino Máquina" autocomplete="off"></div>
+    <div class="input-group"><div class="input-label">Músculo / observação (opcional)</div><input class="input" id="neMuscle" placeholder="Ex: Peitoral maior" autocomplete="off"></div>`,
+    [{label:'💾 Salvar',cls:'btn-accent',fn:()=>{
+      const name=document.getElementById('neName').value.replace(/[<>]/g,'').trim();
+      const muscle=document.getElementById('neMuscle').value.replace(/[<>]/g,'').trim();
+      if(!name){showToast('⚠️ Digite o nome');return;}
+      if(Object.values(S.exerciseDB).some(e=>e.group===grp&&e.name.toLowerCase()===name.toLowerCase())){showToast('⚠️ Esse exercício já existe');return;}
+      const id='custom_'+Date.now().toString(36);
+      S.exerciseDB[id]={name,group:grp,muscle:muscle||GROUP_LABELS[grp],active:true,custom:true};
+      if(grp==='cardio') S.exerciseDB[id].isCardio=true;
+      save(); showToast('✅ Exercício criado!'); openExerciseDB(grp);
+    }},{label:'Voltar',cls:'btn-ghost',fn:()=>openExerciseDB(grp)}]);
+  setTimeout(()=>document.getElementById('neName')?.focus(),350);
 }
 
 function confirmReset(){
@@ -1669,8 +1806,8 @@ function exportExcel(){
     const histRows=[['EXERCÍCIO','DATA','CARGA','SÉRIES','REPS']];
     Object.entries(S.history).forEach(([id,entries])=>{const ex=exDB(id);(entries||[]).forEach(e=>{histRows.push([ex.name,e.date,e.weight,e.sets,e.reps]);});});
     const wsH=XLSX.utils.aoa_to_sheet(histRows); XLSX.utils.book_append_sheet(wb,wsH,'Histórico de Cargas');
-    const logRows=[['DATA','CONCLUÍDO','TEMPO(min)','ATIVIDADE','TEMPO EXTRA']];
-    Object.entries(S.dailyLogs).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([date,log])=>{ logRows.push([date,log.trained?'Sim':'Não',log.totalTime||'',log.extraActivity||'',log.extraTime||'']);});
+    const logRows=[['DATA','CONCLUÍDO','TEMPO(min)','OUTROS EXERCÍCIOS']];
+    Object.entries(S.dailyLogs).sort((a,b)=>a[0].localeCompare(b[0])).forEach(([date,log])=>{ logRows.push([date,log.trained?'Sim':'Não',log.totalTime||'',getOthers(log).map(o=>o.a+(o.t?' '+o.t+'min':'')).join(' | ')]);});
     const wsL=XLSX.utils.aoa_to_sheet(logRows); XLSX.utils.book_append_sheet(wb,wsL,'Diário');
     if(S.measures&&S.measures.length){
       const mRows=[['DATA',...MEASURE_FIELDS.map(f=>f.l)]];
@@ -1828,7 +1965,7 @@ function showModal(title,bodyHTML,buttons){
 function closeModal(){
   document.getElementById('modal').classList.remove('show');
   document.getElementById('overlay').classList.remove('show');
-  document.getElementById('overlay2')?.remove();
+  closeOverlay2();
 }
 function showToast(msg){
   const t=document.createElement('div');
