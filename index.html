@@ -222,6 +222,7 @@ textarea.input{resize:none;min-height:70px;font-size:13px}
 .chk-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--rs);margin-bottom:6px;cursor:pointer;transition:all .2s}
 .chk-item.selected{border-color:var(--accent);background:var(--accent-bg)}
 .chk-box{width:20px;height:20px;border-radius:4px;border:2px solid var(--border);display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s;font-size:13px;font-weight:700}
+.list-item.selected .chk-box{background:var(--accent);border-color:var(--accent);color:#000}
 .chk-item.selected .chk-box{background:var(--accent);border-color:var(--accent);color:#000}
 
 /* ── IMC BAR ── */
@@ -548,6 +549,18 @@ function getPlanDayExs(plan, dow){
   return (plan.days&&plan.days[dow])||[];
 }
 
+// Qual dia da semana do PLANO vale para uma data (permite trocar/inverter dias)
+function tmplDowFor(ds,fallbackDow){
+  const l=S.dailyLogs[ds];
+  if(l && l.useDow!=null) return l.useDow;
+  return fallbackDow!=null?fallbackDow:new Date(ds+'T12:00:00').getDay();
+}
+function effDow(dow){ return tmplDowFor(dateForDow(dow),dow); }
+function normalizeUseDow(ds){
+  const l=S.dailyLogs[ds];
+  if(l && l.useDow!=null && l.useDow===new Date(ds+'T12:00:00').getDay()) delete l.useDow;
+}
+
 function localDateStr(d){
   const dd=d||new Date();
   return dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0')+'-'+String(dd.getDate()).padStart(2,'0');
@@ -561,8 +574,8 @@ function dateForDow(dow){
 
 function getSession(dow, dateStr){
   const plan=getActivePlan();
-  const tmpl=getPlanDayExs(plan, dow);
   const ds=dateStr||dateForDow(dow);
+  const tmpl=getPlanDayExs(plan, tmplDowFor(ds,dow));
   if(!S.dailyLogs[ds]) S.dailyLogs[ds]={trained:false};
   const log=S.dailyLogs[ds];
   if(!log.session){
@@ -724,7 +737,7 @@ function renderInicio(scr){
   const today=todayStr(), dow=new Date().getDay();
   const log=S.dailyLogs[today]||{};
   const plan=getActivePlan();
-  const dayExs=getPlanDayExs(plan,dow);
+  const dayExs=getPlanDayExs(plan,effDow(dow));
   const daySession=S.dailyLogs[today]?.session||[];
   const done=daySession.filter(e=>e.done).length;
   const pct=dayExs.length?Math.round(done/dayExs.length*100):0;
@@ -857,7 +870,7 @@ function attachCalSwipe(){
 
 function openCalDay(dateStr){
   const dt=new Date(dateStr+'T12:00:00'), dow=dt.getDay(), log=S.dailyLogs[dateStr]||{};
-  const plan=getActivePlan(), dayExs=getPlanDayExs(plan,dow);
+  const plan=getActivePlan(), dayExs=getPlanDayExs(plan,tmplDowFor(dateStr,dow));
   const calSession=log.session||[];
   const isToday=dateStr===todayStr(), isPast=dt<new Date(new Date().toDateString());
   const doneCount=calSession.filter(e=>e.done).length, total=dayExs.length;
@@ -866,7 +879,7 @@ function openCalDay(dateStr){
   if(log.trained) html+=`<div class="card-sm row" style="border-color:var(--accent);background:var(--accent-bg);margin-bottom:10px;gap:8px"><span>✅</span><span style="font-size:13px;font-weight:600">Dia concluído!</span></div>`;
   if(log.totalTime||getOthers(log).length) html+=`<div class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:12px">${log.totalTime?`<span class="tag tag-green">⏱ ${log.totalTime} min</span>`:''}${getOthers(log).map(o=>`<span class="tag tag-blue">⚽ ${o.a}${o.t?' '+o.t+'min':''}</span>`).join('')}</div>`;
   html+=`<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-bottom:5px"><span>${doneCount}/${total} exercícios</span><span>${pct}%</span></div><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div></div>`;
-  html+='<div class="section-label">Treino do Dia</div>';
+  html+=`<div class="section-label">Treino do Dia${tmplDowFor(dateStr,dow)!==dow?' — treino de '+DAYS_FULL[tmplDowFor(dateStr,dow)]:''}</div>`;
   if(!dayExs.length) html+='<div style="text-align:center;padding:20px;color:var(--text3)">Nenhum exercício neste dia</div>';
   else dayExs.forEach((item,idx)=>{
     const ex=exDB(item.exId), s=calSession[idx]||item, isDone=!!s.done;
@@ -939,6 +952,85 @@ function toggleTrainedFor(ds){
 // ════════════════════════════════════════════════════════════
 // TREINO
 // ════════════════════════════════════════════════════════════
+function dayWorkoutSummary(d){
+  const exs=getPlanDayExs(getActivePlan(),d);
+  if(!exs.length) return 'Descanso';
+  const groups=[...new Set(exs.map(e=>exDB(e.exId)).filter(x=>x.group!=='cardio').map(x=>GROUP_LABELS[x.group]||x.group))];
+  return groups.length?groups.slice(0,3).join(' + ')+(groups.length>3?' …':''):'Cardio';
+}
+
+function buildDaySwapBar(dow){
+  const cur=effDow(dow), over=cur!==dow;
+  return `<div class="card-sm row-sb" style="margin-bottom:12px;${over?'border-color:var(--blue);background:rgba(77,166,255,.06)':''}">
+    <div style="min-width:0;flex:1">
+      <div style="font-size:10px;color:var(--text3);letter-spacing:1px;text-transform:uppercase">${over?'Treino trocado ⇄':'Treino do dia'}</div>
+      <div style="font-weight:700;font-size:13px">${over?'Treino de '+DAYS_FULL[cur]+' · ':''}${dayWorkoutSummary(cur)}</div>
+    </div>
+    <button class="btn btn-blue btn-sm" onclick="openDaySwap(${dow})">⇄ Trocar</button>
+  </div>`;
+}
+
+function openDaySwap(dow){
+  const plan=getActivePlan(); if(!plan) return;
+  const ds=dateForDow(dow), cur=effDow(dow), todayS=todayStr();
+  const hasDone=(S.dailyLogs[ds]?.session||[]).some(e=>e.done);
+  const overridden=S.dailyLogs[ds]?.useDow!=null;
+  window._swapSel=null;
+  const rows=[0,1,2,3,4,5,6].filter(d=>d!==cur).map(d=>{
+    const past=dateForDow(d)<todayS;
+    return `<div class="list-item" id="swRow_${d}" onclick="pickSwapDay(${dow},${d})">
+      <div class="li-info"><div class="li-name">${DAYS_FULL[d]}</div><div class="li-sub">${dayWorkoutSummary(d)}${past?' • dia já passou':''}</div></div>
+      <div class="chk-box" id="swBox_${d}"></div>
+    </div>`;}).join('');
+  showModal(`⇄ Trocar treino — ${DAYS_SHORT[dow]}`,`
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.5">Hoje (${DAYS_FULL[dow]}) está com o treino de <strong style="color:var(--text)">${DAYS_FULL[cur]}</strong>. Escolha o treino que quer fazer neste dia. Vale só para esta semana — seu plano não é alterado.</div>
+    ${overridden?`<button class="btn btn-ghost btn-full" style="margin-bottom:12px" onclick="restoreDayWorkout(${dow})">↩ Voltar ao treino original de ${DAYS_FULL[dow]}</button>`:''}
+    <div class="section-label" style="margin-top:4px">Fazer o treino de…</div>
+    ${rows}
+    <div class="chk-item" id="swInv" onclick="this.classList.toggle('selected');document.getElementById('swInvBox').textContent=this.classList.contains('selected')?'✓':''" style="margin-top:10px;opacity:.45;pointer-events:none">
+      <div class="chk-box" id="swInvBox"></div>
+      <div><div style="font-weight:600;font-size:14px">Inverter os dois dias</div><div id="swInvTxt" style="font-size:11px;color:var(--text3)">Escolha um dia acima</div></div>
+    </div>
+    ${hasDone?'<div style="font-size:11px;color:var(--orange);margin-top:10px">⚠️ Os exercícios já marcados hoje que não existirem no novo treino serão descartados.</div>':''}`,
+    [{label:'✅ Confirmar troca',cls:'btn-accent',fn:()=>confirmDaySwap(dow)},{label:'Cancelar',cls:'btn-ghost',fn:closeModal}]);
+}
+
+function pickSwapDay(dow,d){
+  window._swapSel=d;
+  const cur=effDow(dow);
+  [0,1,2,3,4,5,6].forEach(x=>{
+    const r=document.getElementById('swRow_'+x); if(!r) return;
+    const on=x===d; r.classList.toggle('selected',on);
+    document.getElementById('swBox_'+x).textContent=on?'✓':'';
+  });
+  const inv=document.getElementById('swInv'), box=document.getElementById('swInvBox');
+  const past=dateForDow(d)<todayStr();
+  inv.style.opacity=1; inv.style.pointerEvents='auto';
+  inv.classList.toggle('selected',!past); box.textContent=past?'':'✓';
+  document.getElementById('swInvTxt').textContent=`${DAYS_FULL[d]} passa a fazer o treino de ${DAYS_FULL[cur]}${past?' (dia já passou)':''}`;
+}
+
+function confirmDaySwap(dow){
+  const d=window._swapSel;
+  if(d==null){ showToast('⚠️ Escolha um dia'); return; }
+  const ds=dateForDow(dow), ds2=dateForDow(d), cur=effDow(dow);
+  const inv=document.getElementById('swInv').classList.contains('selected');
+  if(!S.dailyLogs[ds]) S.dailyLogs[ds]={trained:false};
+  S.dailyLogs[ds].useDow=d;
+  if(inv){
+    if(!S.dailyLogs[ds2]) S.dailyLogs[ds2]={trained:false};
+    S.dailyLogs[ds2].useDow=cur;
+  }
+  normalizeUseDow(ds); if(inv) normalizeUseDow(ds2);
+  save(); closeModal(); render(); showToast('⇄ Treino trocado!');
+}
+
+function restoreDayWorkout(dow){
+  const ds=dateForDow(dow);
+  if(S.dailyLogs[ds]) delete S.dailyLogs[ds].useDow;
+  save(); closeModal(); render(); showToast('↩ Treino original restaurado');
+}
+
 function renderTreino(scr){
   const wrap=document.createElement('div');
   wrap.style.cssText='display:flex;flex-direction:column;height:100%';
@@ -946,14 +1038,15 @@ function renderTreino(scr){
   const plan=getActivePlan();
   const bar=document.createElement('div'); bar.className='days-bar';
   DAYS_SHORT.forEach((label,d)=>{
-    const exs=getPlanDayExs(plan,d);
+    const exs=getPlanDayExs(plan,effDow(d));
+    const over=effDow(d)!==d;
     const ds=dateForDow(d);
     const existSess=S.dailyLogs[ds]?.session;
     const done=existSess?existSess.filter(e=>e.done).length:0;
     const isToday=d===new Date().getDay();
     const btn=document.createElement('button');
     btn.className='day-btn'+(d===activeDay?' active':'')+(done>0?' has-done':'');
-    btn.innerHTML=`<span class="da">${label}${isToday?'•':''}</span><span class="dp">${done}/${exs.length}</span>`;
+    btn.innerHTML=`<span class="da">${label}${isToday?'•':''}${over?'⇄':''}</span><span class="dp">${done}/${exs.length}</span>`;
     btn.onclick=()=>{activeDay=d;render();};
     bar.appendChild(btn);
   });
@@ -966,7 +1059,7 @@ function renderTreino(scr){
   if(!plan){
     content.innerHTML=`<div style="text-align:center;padding:60px 20px;color:var(--text3)"><div style="font-size:48px;margin-bottom:12px">📋</div><div style="font-family:'Bebas Neue',sans-serif;font-size:22px;letter-spacing:2px">Nenhum Plano Ativo</div><button class="btn btn-accent" style="margin-top:16px" onclick="nav('planos')">Criar Plano de Treino</button></div>`;
   } else {
-    const tmplExs=getPlanDayExs(plan,activeDay);
+    const tmplExs=getPlanDayExs(plan,effDow(activeDay));
     const sessionExs=getSession(activeDay);
     const dayExs=tmplExs.map((t,i)=>{
       const s=sessionExs[i]||{exId:t.exId,sets:t.sets,reps:t.reps,weight:'',time:'',done:false,obs:''};
@@ -987,9 +1080,10 @@ function renderTreino(scr){
       content.appendChild(addBtn);
     }
   }
+  if(plan) content.insertAdjacentHTML('afterbegin',buildDaySwapBar(activeDay));
   wrap.appendChild(content);
 
-  const plan2=getActivePlan(), dayExs2=getPlanDayExs(plan2,activeDay);
+  const plan2=getActivePlan(), dayExs2=getPlanDayExs(plan2,effDow(activeDay));
   const sess2=S.dailyLogs[dateForDow(activeDay)]?.session||[];
   const done2=sess2.filter(e=>e.done).length, pct=dayExs2.length?Math.round(done2/dayExs2.length*100):0;
   const prog=document.createElement('div'); prog.className='prog-bar-wrap';
@@ -1070,9 +1164,9 @@ function toggleDone(dow,idx){
 }
 
 function removeExFromPlan(dow,idx){
-  const plan=getActivePlan(); if(!plan) return;
-  if(!plan.days[dow]) return;
-  plan.days[dow].splice(idx,1);
+  const plan=getActivePlan(); if(!plan) return; const pd=effDow(dow);
+  if(!plan.days[pd]) return;
+  plan.days[pd].splice(idx,1);
   // PRESERVE session — just remove that specific index
   const ds=dateForDow(dow);
   if(S.dailyLogs[ds]?.session){
@@ -1082,8 +1176,8 @@ function removeExFromPlan(dow,idx){
 }
 
 function openExConfig(dow,idx){
-  const plan=getActivePlan(); if(!plan) return;
-  const item=plan.days[dow][idx]; const ex=exDB(item.exId); _ecFailure=!!item.toFailure;
+  const plan=getActivePlan(); if(!plan) return; const pd=effDow(dow);
+  const item=plan.days[pd][idx]; const ex=exDB(item.exId); _ecFailure=!!item.toFailure;
   showModal(`⚙️ ${ex.name}`,`
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
       <div class="input-group" style="margin-bottom:0"><div class="input-label">Séries</div><input class="input" id="ecSets" type="number" inputmode="numeric" value="${item.sets||4}"></div>
@@ -1124,8 +1218,8 @@ function toggleEcFailure(){
 }
 
 function openSwap(dow,idx){
-  const plan=getActivePlan(); if(!plan) return;
-  const cur=plan.days[dow][idx], curEx=exDB(cur.exId);
+  const plan=getActivePlan(); if(!plan) return; const pd=effDow(dow);
+  const cur=plan.days[pd][idx], curEx=exDB(cur.exId);
   let selGrp=curEx.group||'peito';
   const rs=()=>{
     const list=Object.entries(S.exerciseDB).filter(([,ex])=>ex.group===selGrp&&ex.active).sort((a,b)=>a[1].name.localeCompare(b[1].name));
@@ -1141,9 +1235,9 @@ function openSwap(dow,idx){
 }
 
 function doSwap(dow,idx,newId){
-  const plan=getActivePlan(); if(!plan) return;
-  const old=plan.days[dow][idx];
-  plan.days[dow][idx]={exId:newId,sets:old.sets,reps:old.reps,weight:'',time:'',obs:'',rest:old.rest||60,toFailure:false,technique:'none'};
+  const plan=getActivePlan(); if(!plan) return; const pd=effDow(dow);
+  const old=plan.days[pd][idx];
+  plan.days[pd][idx]={exId:newId,sets:old.sets,reps:old.reps,weight:'',time:'',obs:'',rest:old.rest||60,toFailure:false,technique:'none'};
   // PRESERVE session — only replace that specific entry, keep others intact
   const ds=dateForDow(dow);
   if(S.dailyLogs[ds]?.session){
@@ -1167,9 +1261,9 @@ function openAddExToPlan(dow){
 }
 
 function addExToPlan(dow,exId){
-  const plan=getActivePlan(); if(!plan) return;
-  if(!plan.days[dow]) plan.days[dow]=[];
-  plan.days[dow].push({exId,sets:4,reps:12,weight:'',time:'',obs:'',rest:60,toFailure:false,technique:'none'});
+  const plan=getActivePlan(); if(!plan) return; const pd=effDow(dow);
+  if(!plan.days[pd]) plan.days[pd]=[];
+  plan.days[pd].push({exId,sets:4,reps:12,weight:'',time:'',obs:'',rest:60,toFailure:false,technique:'none'});
   // PRESERVE existing session — just append new blank entry instead of wiping
   const ds=dateForDow(dow);
   if(S.dailyLogs[ds]?.session){
